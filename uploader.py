@@ -18,7 +18,7 @@ COOKIES_FILE   = "/tmp/yt_cookies.txt"
 SCHEDULE_DELAY = 2  # hours until video goes public
 
 SHORTS_MAX_DURATION = 60
-COBALT_API         = "https://api.cobalt.tools"
+COBALT_API         = "https://co.wuk.sh"
 # ──────────────────────────────────────────────────────────────────────────────
 
 def install_dependencies():
@@ -72,10 +72,11 @@ def download_via_cobalt(url):
 
     print("[INFO] Attempt 1: cobalt.tools")
     try:
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
         resp = requests.post(
             f"{COBALT_API}/",
             json={"url": url, "videoQuality": "1080", "filenameStyle": "basic"},
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            headers=headers,
             timeout=30,
         )
         data = resp.json()
