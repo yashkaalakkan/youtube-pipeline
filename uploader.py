@@ -255,7 +255,14 @@ def upload_to_youtube(video_path, metadata, upload_type="video"):
     publish_at     = datetime.datetime.utcnow() + datetime.timedelta(hours=SCHEDULE_DELAY)
     publish_at_str = publish_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-    title       = metadata["title"]
+    # Sanitize title: remove invalid chars, truncate to 100 chars (YouTube limit)
+    title = metadata["title"] or "Untitled Video"
+    title = re.sub(r"[<>]", "", title)
+    title = re.sub(r"\s+", " ", title).strip()
+    title = re.sub(r"\s*\(\d+p[^)]*\)", "", title).strip()
+    if not title:
+        title = "Untitled Video"
+    title = title[:100]
     description = metadata["description"] or ""
     tags        = []  # skip tags to avoid YouTube API invalidTags errors
 
