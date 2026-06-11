@@ -1,0 +1,62 @@
+name: YouTube Pipeline
+
+on:
+  schedule:
+    - cron: "0 1 * * *"   # 5:00 AM UTC daily
+    - cron: "0 3 * * *"  # 5:00 PM UTC daily
+    - cron: "0 5 * * *"  # 5:00 PM UTC daily
+    - cron: "0 7 * * *"  # 5:00 PM UTC daily
+    - cron: "0 9 * * *"  # 5:00 PM UTC daily
+    - cron: "0 11 * * *"  # 5:00 PM UTC daily
+    - cron: "0 13 * * *"  # 5:00 PM UTC daily
+    - cron: "0 15 * * *"  # 5:00 PM UTC daily
+    - cron: "0 17 * * *"  # 5:00 PM UTC daily
+    - cron: "0 19 * * *"  # 5:00 PM UTC daily
+    - cron: "0 21 * * *"  # 5:00 PM UTC daily
+    - cron: "0 23 * * *"  # 5:00 PM UTC daily
+  workflow_dispatch:
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove cookies.txt if accidentally committed
+        run: rm -f cookies.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js (yt-dlp JS runtime for n-challenge)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade yt-dlp yt-dlp-ejs google-api-python-client google-auth google-auth-oauthlib
+
+      - name: Run YouTube pipeline
+        env:
+          YT_CLIENT_ID:     ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          YT_COOKIES:       ${{ secrets.YT_COOKIES }}
+        run: python uploader.py
+
+      - name: Commit updated links.txt
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add links.txt
+          git diff --cached --quiet || git commit -m "chore: remove processed link [skip ci]"
+          git push
