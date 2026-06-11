@@ -1,8 +1,10 @@
 import os
 import json
+import re
 import datetime
 import sys
 import subprocess
+import urllib.request
 
 # ─── CONFIGURATION (from environment variables / GitHub Secrets) ──────────────
 CLIENT_ID      = os.environ["YT_CLIENT_ID"]
@@ -16,13 +18,14 @@ COOKIES_FILE   = "/tmp/yt_cookies.txt"
 SCHEDULE_DELAY = 2  # hours until video goes public
 
 SHORTS_MAX_DURATION = 60
+COBALT_API         = "https://api.cobalt.tools"
 # ──────────────────────────────────────────────────────────────────────────────
 
 def install_dependencies():
     subprocess.check_call([
         sys.executable, "-m", "pip", "install",
         "yt-dlp", "yt-dlp-ejs", "google-api-python-client",
-        "google-auth", "google-auth-oauthlib", "-q"
+        "google-auth", "google-auth-oauthlib", "requests", "-q"
     ])
 
 def setup_cookies():
@@ -60,7 +63,66 @@ def remove_bottom_link(filepath):
 def is_shorts_url(url):
     return "/shorts/" in url
 
-def download_video(url, cookies_file=None):
+# ─── DOWNLOAD LAYER 1: Cobalt ─────────────────────────────────────────────────
+
+def download_via_cobalt(url):
+    """Try cobalt.tools API first — no auth, no cookies needed."""
+    import requests
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    print("[INFO] Attempt 1: cobalt.tools")
+    try:
+        resp = requests.post(
+            f"{COBALT_API}/",
+            json={"url": url, "videoQuality": "1080", "filenameStyle": "basic"},
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=30,
+        )
+        data = resp.json()
+        status = data.get("status")
+
+        # cobalt returns status: "stream" or "redirect" with a download URL
+        if status in ("stream", "redirect", "tunnel"):
+            video_url = data.get("url")
+            if not video_url:
+                print(f"[WARN] cobalt: no URL in response: {data}")
+                return None
+
+            # Extract video ID from YouTube URL
+            match = re.search(r"(?:v=|shorts/)([\w-]{11})", url)
+            video_id = match.group(1) if match else "video"
+            out_path = os.path.join(DOWNLOAD_DIR, f"{video_id}.mp4")
+
+            print(f"[INFO] cobalt: downloading from {video_url[:60]}...")
+            urllib.request.urlretrieve(video_url, out_path)
+            print(f"[INFO] cobalt: saved to {out_path}")
+
+            # Build a minimal info dict matching yt-dlp's structure
+            return {
+                "id":          video_id,
+                "title":       data.get("filename", video_id).replace(".mp4", ""),
+                "description": "",
+                "tags":        [],
+                "categories":  [],
+                "duration":    None,
+                "uploader":    "",
+                "upload_date": "",
+                "thumbnail":   "",
+                "webpage_url": url,
+                "_cobalt":     True,
+            }
+        else:
+            print(f"[WARN] cobalt: unexpected status '{status}': {data}")
+            return None
+
+    except Exception as e:
+        print(f"[WARN] cobalt failed: {e}")
+        return None
+
+# ─── DOWNLOAD LAYER 2: yt-dlp ─────────────────────────────────────────────────
+
+def download_via_ytdlp(url, cookies_file=None):
+    """Fallback to yt-dlp with cookie + EJS solver."""
     import yt_dlp
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -75,48 +137,59 @@ def download_video(url, cookies_file=None):
         "ignoreerrors":       False,
         "cookiefile":         None,
         "cookiesfrombrowser": None,
-        # Tell yt-dlp to use node runtime and fetch EJS solver scripts
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios"],
-            }
-        },
     }
 
-    # Attempt 1 & 2: cookieless ios/android
-    cookieless_attempts = [
-        ("ios",     ["ios"]),
-        ("android", ["android"]),
-    ]
-    for label, clients in cookieless_attempts:
-        print(f"[INFO] Attempt: {label} (no cookies)")
+    # Attempt A & B: cookieless ios/android
+    for label, clients in [("ios", ["ios"]), ("android", ["android"])]:
+        print(f"[INFO] yt-dlp attempt: {label} (no cookies)")
         opts = dict(base_opts)
         opts["extractor_args"] = {"youtube": {"player_client": clients}}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(url, download=True)
         except Exception as e:
-            print(f"[WARN] {label} failed: {e}")
+            print(f"[WARN] yt-dlp {label} failed: {e}")
 
-    # Attempt 3: web + cookies + EJS solver via node
+    # Attempt C: web + cookies + EJS solver
     if cookies_file and os.path.exists(cookies_file):
-        print("[INFO] Attempt: web client with cookies + EJS solver")
+        print("[INFO] yt-dlp attempt: web + cookies + EJS solver")
         opts = dict(base_opts)
-        opts["cookiefile"] = cookies_file
-        opts["extractor_args"] = {"youtube": {"player_client": ["web"]}}
-        # Use node runtime and fetch EJS scripts from GitHub
-        opts["js_runtimes"] = {"node": {}}
+        opts["cookiefile"]        = cookies_file
+        opts["extractor_args"]    = {"youtube": {"player_client": ["web"]}}
+        opts["js_runtimes"]       = {"node": {}}
         opts["remote_components"] = ["ejs:github"]
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(url, download=True)
         except Exception as e:
-            print(f"[WARN] web+cookies+EJS failed: {e}")
+            print(f"[WARN] yt-dlp web+cookies failed: {e}")
     else:
-        print("[WARN] No cookies available for web client fallback.")
+        print("[WARN] No cookies for yt-dlp web fallback.")
+
+    return None
+
+# ─── UNIFIED DOWNLOAD ─────────────────────────────────────────────────────────
+
+def download_video(url, cookies_file=None):
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    # Layer 1: cobalt
+    info = download_via_cobalt(url)
+    if info:
+        print("[INFO] Download succeeded via cobalt.")
+        return info
+
+    # Layer 2: yt-dlp
+    print("[INFO] Attempt 2: yt-dlp fallback")
+    info = download_via_ytdlp(url, cookies_file)
+    if info:
+        print("[INFO] Download succeeded via yt-dlp.")
+        return info
 
     print("[ERROR] All download attempts failed.")
     sys.exit(1)
+
+# ─── METADATA ─────────────────────────────────────────────────────────────────
 
 def save_metadata(info):
     os.makedirs(METADATA_DIR, exist_ok=True)
@@ -161,6 +234,8 @@ def detect_upload_type(url, duration):
         return "short"
     return "video"
 
+# ─── UPLOAD ───────────────────────────────────────────────────────────────────
+
 def upload_to_youtube(video_path, metadata, upload_type="video"):
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
@@ -181,7 +256,7 @@ def upload_to_youtube(video_path, metadata, upload_type="video"):
 
     title       = metadata["title"]
     description = metadata["description"] or ""
-    tags = []  # skip tags to avoid YouTube API invalidTags errors
+    tags        = []  # skip tags to avoid YouTube API invalidTags errors
 
     if upload_type == "short":
         print("[INFO] Upload type: SHORT")
@@ -189,8 +264,7 @@ def upload_to_youtube(video_path, metadata, upload_type="video"):
             title = title + " #Shorts"
         if "#Shorts" not in description:
             description = "#Shorts\n\n" + description
-        if "Shorts" not in tags:
-            tags = ["Shorts"] + tags
+        tags = ["Shorts"]
     else:
         print("[INFO] Upload type: VIDEO (regular)")
 
@@ -241,6 +315,8 @@ def upload_to_youtube(video_path, metadata, upload_type="video"):
             print(f"[WARN] Thumbnail upload failed: {e}")
 
     return uploaded_id
+
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
     print(f"\n{'='*55}")
