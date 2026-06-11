@@ -18,7 +18,7 @@ COOKIES_FILE   = "/tmp/yt_cookies.txt"
 SCHEDULE_DELAY = 2  # hours until video goes public
 
 SHORTS_MAX_DURATION = 60
-COBALT_API         = "https://co.wuk.sh"
+COBALT_API         = os.environ.get("COBALT_URL", "https://cobalt-api-production-4d46.up.railway.app")
 # ──────────────────────────────────────────────────────────────────────────────
 
 def install_dependencies():
