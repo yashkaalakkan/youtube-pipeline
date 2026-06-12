@@ -279,6 +279,8 @@ def upload_to_youtube(video_path, metadata, upload_type="video"):
     if upload_type == "short":
         print("[INFO] Upload type: SHORT")
         if "#Shorts" not in title and "#shorts" not in title:
+            if len(title) + len(" #Shorts") > 100:
+                title = title[:100 - len(" #Shorts")].rstrip()
             title = title + " #Shorts"
         if "#Shorts" not in description:
             description = "#Shorts\n\n" + description
