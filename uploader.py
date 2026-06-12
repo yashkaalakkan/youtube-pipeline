@@ -19,6 +19,13 @@ SCHEDULE_DELAY = 2  # hours until video goes public
 
 SHORTS_MAX_DURATION = 60
 COBALT_API         = os.environ.get("COBALT_URL", "https://cobalt-api-production-4d46.up.railway.app")
+
+# Webshare rotating residential proxy (set via GitHub secrets)
+WEBSHARE_USER = os.environ.get("WEBSHARE_USERNAME", "").strip()
+WEBSHARE_PASS = os.environ.get("WEBSHARE_PASSWORD", "").strip()
+PROXY_URL = None
+if WEBSHARE_USER and WEBSHARE_PASS:
+    PROXY_URL = f"http://{WEBSHARE_USER}-rotate:{WEBSHARE_PASS}@p.webshare.io:80"
 # ──────────────────────────────────────────────────────────────────────────────
 
 def install_dependencies():
@@ -139,6 +146,9 @@ def download_via_ytdlp(url, cookies_file=None):
         "cookiefile":         None,
         "cookiesfrombrowser": None,
     }
+    if PROXY_URL:
+        base_opts["proxy"] = PROXY_URL
+        print("[INFO] Using residential proxy for yt-dlp.")
 
     # Attempt A & B: cookieless ios/android
     for label, clients in [("ios", ["ios"]), ("android", ["android"])]:

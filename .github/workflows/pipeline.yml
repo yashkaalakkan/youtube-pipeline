@@ -2,12 +2,8 @@ name: YouTube Pipeline
 
 on:
   schedule:
-    - cron: "0 1 * * *"
-    - cron: "0 5 * * *"  
-    - cron: "0 9 * * *"  
-    - cron: "0 13 * * *"  
-    - cron: "0 17 * * *" 
-    - cron: "0 21 * * *" 
+    - cron: "0 5 * * *"   # 5:00 AM UTC daily
+    - cron: "0 17 * * *"  # 5:00 PM UTC daily
   workflow_dispatch:
 
 jobs:
@@ -45,6 +41,8 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           YT_COOKIES:       ${{ secrets.YT_COOKIES }}
+          WEBSHARE_USERNAME: ${{ secrets.WEBSHARE_USERNAME }}
+          WEBSHARE_PASSWORD: ${{ secrets.WEBSHARE_PASSWORD }}
         run: python uploader.py
 
       - name: Commit updated links.txt
